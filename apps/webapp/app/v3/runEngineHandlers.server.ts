@@ -25,8 +25,74 @@ import { roomFromFriendlyRunId, socketIo } from "./handleSocketIo.server";
 import { engine } from "./runEngine.server";
 import { PerformTaskRunAlertsService } from "./services/alerts/performTaskRunAlerts.server";
 import { TaskRunErrorCodes } from "@trigger.dev/core/v3";
+import { projectPubSub } from "./services/projectPubSub.server";
 
 export function registerRunEngineEventBusHandlers() {
+  async function publishRunChange(
+    source: string,
+    runId: string,
+    projectId: string,
+    environmentId: string
+  ) {
+    try {
+      await projectPubSub.publish(
+        `project:${projectId}:env:${environmentId}`,
+        "RUN_STATUS_CHANGED",
+        { environmentId, runId, source }
+      );
+    } catch (error) {
+      logger.error(`[${source}] Failed to publish run status change`, {
+        error: error instanceof Error ? error.message : error,
+        runId,
+        projectId,
+        environmentId,
+      });
+    }
+  }
+
+  engine.eventBus.on("runCreated", async ({ runId }) => {
+    const [err, run] = await tryCatch(
+      $replica.taskRun.findFirstOrThrow({
+        where: { id: runId },
+        select: { id: true, projectId: true, runtimeEnvironmentId: true },
+      })
+    );
+
+    if (err) {
+      logger.error("[runCreated] Failed to find task run for pub/sub", {
+        error: err,
+        runId,
+      });
+      return;
+    }
+
+    await publishRunChange("runCreated", run.id, run.projectId, run.runtimeEnvironmentId);
+  });
+
+  engine.eventBus.on("runStatusChanged", async ({ run, project, environment }) => {
+    await publishRunChange("runStatusChanged", run.id, project.id, environment.id);
+  });
+
+  engine.eventBus.on("runLocked", async ({ run, project, environment }) => {
+    await publishRunChange("runLocked", run.id, project.id, environment.id);
+  });
+
+  engine.eventBus.on("runSucceeded", async ({ run, project, environment }) => {
+    await publishRunChange("runSucceeded", run.id, project.id, environment.id);
+  });
+
+  engine.eventBus.on("runFailed", async ({ run, project, environment }) => {
+    await publishRunChange("runFailed", run.id, project.id, environment.id);
+  });
+
+  engine.eventBus.on("runCancelled", async ({ run, project, environment }) => {
+    await publishRunChange("runCancelled", run.id, project.id, environment.id);
+  });
+
+  engine.eventBus.on("runExpired", async ({ run, project, environment }) => {
+    await publishRunChange("runExpired", run.id, project.id, environment.id);
+  });
+
   engine.eventBus.on("runSucceeded", async ({ time, run }) => {
     const [taskRunError, taskRun] = await tryCatch(
       $replica.taskRun.findFirstOrThrow({

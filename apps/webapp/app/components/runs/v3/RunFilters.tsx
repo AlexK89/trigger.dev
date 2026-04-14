@@ -12,7 +12,7 @@ import { Form, useFetcher } from "@remix-run/react";
 import { IconBugFilled, IconRotateClockwise2, IconToggleLeft } from "@tabler/icons-react";
 import { MachinePresetName } from "@trigger.dev/core/v3";
 import type { BulkActionType, TaskRunStatus, TaskTriggerSource } from "@trigger.dev/database";
-import { ListFilterIcon } from "lucide-react";
+import { ListFilterIcon, PlayCircleIcon, PauseCircleIcon, RefreshCcwIcon } from "lucide-react";
 import { matchSorter } from "match-sorter";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { z } from "zod";
@@ -335,9 +335,15 @@ type RunFiltersProps = {
   hideSearch?: boolean;
   /** Custom default period for the time filter (e.g., "1h", "7d") */
   defaultPeriod?: string;
+  isLiveData?: boolean;
+  onToggleLiveData?: () => void;
+  onRefresh?: () => void;
+  runsBehind?: number;
+  lastUpdatedAt?: Date | null;
 };
 
 export function RunsFilters(props: RunFiltersProps) {
+  const isLiveData = props.isLiveData ?? false;
   const location = useOptimisticLocation();
   const searchParams = new URLSearchParams(location.search);
   const hasFilters =
@@ -354,20 +360,46 @@ export function RunsFilters(props: RunFiltersProps) {
     searchParams.has("errorId");
 
   return (
-    <div className="flex flex-row flex-wrap items-center gap-1">
-      <FilterMenu {...props} />
-      {!props.hideSearch && <AIFilterInput />}
-      <RootOnlyToggle defaultValue={props.rootOnlyDefault} />
-      <TimeFilter defaultPeriod={props.defaultPeriod} />
-      <AppliedFilters {...props} />
-      {hasFilters && (
-        <Form className="h-6">
-          {searchParams.has("rootOnly") && (
-            <input type="hidden" name="rootOnly" value={searchParams.get("rootOnly") as string} />
+    <div className="flex w-full flex-col justify-center gap-1">
+      <div className="flex w-full items-center justify-between gap-1">
+        <FilterMenu {...props} />
+        <div className="flex flex-row items-center gap-1">
+          {!isLiveData && (props.runsBehind ?? 0) > 0 && (
+            <p className="m-0 whitespace-nowrap text-xs text-text-dimmed">
+              {props.runsBehind} {props.runsBehind === 1 ? "run" : "runs"} behind
+            </p>
           )}
-          <Button variant="secondary/small" LeadingIcon={XMarkIcon} tooltip="Clear all filters" />
-        </Form>
-      )}
+
+          <Button
+            variant="secondary/small"
+            LeadingIcon={RefreshCcwIcon}
+            tooltip="Refresh"
+            className="flex"
+            onClick={props.onRefresh}
+          />
+          <Button
+            variant="secondary/small"
+            tooltip={isLiveData ? "Pause live updates" : "Resume live updates"}
+            className="flex"
+            LeadingIcon={isLiveData ? PauseCircleIcon : PlayCircleIcon}
+            onClick={props.onToggleLiveData}
+          />
+        </div>
+      </div>
+      <div className="flex flex-row flex-wrap items-center gap-1">
+        {!props.hideSearch && <AIFilterInput />}
+        <RootOnlyToggle defaultValue={props.rootOnlyDefault} />
+        <TimeFilter defaultPeriod={props.defaultPeriod} />
+        <AppliedFilters {...props} />
+        {hasFilters && (
+          <Form className="h-6">
+            {searchParams.has("rootOnly") && (
+              <input type="hidden" name="rootOnly" value={searchParams.get("rootOnly") as string} />
+            )}
+            <Button variant="secondary/small" LeadingIcon={XMarkIcon} tooltip="Clear all filters" />
+          </Form>
+        )}
+      </div>
     </div>
   );
 }

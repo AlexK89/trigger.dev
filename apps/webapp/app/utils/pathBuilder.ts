@@ -202,6 +202,14 @@ export function v3TasksStreamingPath(
   return `${v3EnvironmentPath(organization, project, environment)}/tasks/stream`;
 }
 
+export function v3RunsStreamingPath(
+  organization: OrgForPath,
+  project: ProjectForPath,
+  environment: EnvironmentForPath
+) {
+  return `${v3EnvironmentPath(organization, project, environment)}/runs/stream`;
+}
+
 export function v3ApiKeysPath(
   organization: OrgForPath,
   project: ProjectForPath,

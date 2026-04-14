@@ -158,7 +158,7 @@ export function Feedback({ button, defaultValue = "bug", onOpenChange }: Feedbac
               <FormError>{form.error}</FormError>
               <FormButtons
                 confirmButton={
-                  <Button type="submit" variant="primary/medium">
+                  <Button type="submit" variant="primary/medium" shortcut={{ key: "enter" }}>
                     Send message
                   </Button>
                 }

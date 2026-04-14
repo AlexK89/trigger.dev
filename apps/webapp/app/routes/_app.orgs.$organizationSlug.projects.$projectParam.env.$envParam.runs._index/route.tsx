@@ -1,7 +1,7 @@
 import { BeakerIcon, BookOpenIcon } from "@heroicons/react/24/solid";
-import { type MetaFunction, useNavigation } from "@remix-run/react";
+import { type MetaFunction, useNavigation, useRevalidator } from "@remix-run/react";
 import { type LoaderFunctionArgs } from "@remix-run/server-runtime";
-import { Suspense } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import {
   TypedAwait,
   typeddefer,
@@ -36,6 +36,7 @@ import { TaskRunsTable } from "~/components/runs/v3/TaskRunsTable";
 import { BULK_ACTION_RUN_LIMIT } from "~/consts";
 import { $replica } from "~/db.server";
 import { useEnvironment } from "~/hooks/useEnvironment";
+import { useRunsStream } from "~/hooks/useRunsStream";
 import { useOrganization } from "~/hooks/useOrganizations";
 import { useProject } from "~/hooks/useProject";
 import { useSearchParams } from "~/hooks/useSearchParam";
@@ -56,6 +57,7 @@ import {
   EnvironmentParamSchema,
   v3CreateBulkActionPath,
   v3ProjectPath,
+  v3RunsStreamingPath,
   v3TestPath,
   v3TestTaskPath,
 } from "~/utils/pathBuilder";
@@ -201,6 +203,39 @@ function RunsList({
   const environment = useEnvironment();
   const { has, replace } = useSearchParams();
 
+  const [isLiveData, setIsLiveData] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const revalidator = useRevalidator();
+
+  const handleRevalidate = () => {
+    revalidator.revalidate();
+    setLastUpdatedAt(new Date());
+  };
+
+  const { runsBehind, resetRunsBehind } = useRunsStream(
+    v3RunsStreamingPath(organization, project, environment),
+    { isLiveData, onRevalidate: handleRevalidate }
+  );
+
+  const frozenRunIds = useRef<Set<string> | null>(null);
+
+  const handleRefresh = () => {
+    handleRevalidate();
+    resetRunsBehind();
+    frozenRunIds.current = null;
+  };
+
+  // Re-snapshot after revalidation completes while paused
+  useEffect(() => {
+    if (!isLiveData && frozenRunIds.current === null) {
+      frozenRunIds.current = new Set(list.runs.map((r) => r.id));
+    }
+  }, [list.runs, isLiveData]);
+
+  const displayedRuns = frozenRunIds.current
+    ? list.runs.filter((r) => frozenRunIds.current!.has(r.id))
+    : list.runs;
+
   // Shortcut keys for bulk actions
   useShortcutKeys({
     shortcut: { key: "r" },
@@ -254,6 +289,18 @@ function RunsList({
                     bulkActions={list.bulkActions}
                     hasFilters={list.hasFilters}
                     rootOnlyDefault={rootOnlyDefault}
+                    isLiveData={isLiveData}
+                    onToggleLiveData={() => {
+                      if (isLiveData) {
+                        frozenRunIds.current = new Set(list.runs.map((r) => r.id));
+                      } else {
+                        frozenRunIds.current = null;
+                      }
+                      setIsLiveData((v) => !v);
+                    }}
+                    onRefresh={handleRefresh}
+                    runsBehind={runsBehind}
+                    lastUpdatedAt={lastUpdatedAt}
                   />
                   <div className="flex items-center justify-end gap-x-2">
                     {!isShowingBulkActionInspector && (
@@ -294,10 +341,10 @@ function RunsList({
                 </div>
 
                 <TaskRunsTable
-                  total={list.runs.length}
+                  total={displayedRuns.length}
                   hasFilters={list.hasFilters}
                   filters={list.filters}
-                  runs={list.runs}
+                  runs={displayedRuns}
                   isLoading={isLoading}
                   allowSelection
                   rootOnlyDefault={rootOnlyDefault}

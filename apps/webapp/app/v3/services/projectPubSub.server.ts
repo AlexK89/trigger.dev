@@ -13,6 +13,11 @@ const messageCatalog = {
     taskCount: z.number(),
     type: z.union([z.literal("local"), z.literal("deployed")]),
   }),
+  RUN_STATUS_CHANGED: z.object({
+    environmentId: z.string(),
+    runId: z.string(),
+    source: z.string(),
+  }),
 };
 
 export type ProjectSubscriber = ZodSubscriber<typeof messageCatalog>;
