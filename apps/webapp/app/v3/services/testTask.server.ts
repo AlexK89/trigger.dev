@@ -17,6 +17,7 @@ export class TestTaskService extends BaseService {
           {
             payload: data.payload,
             options: {
+              payloadType: data.payloadType,
               test: true,
               metadata: data.metadata,
               delay: data.delaySeconds

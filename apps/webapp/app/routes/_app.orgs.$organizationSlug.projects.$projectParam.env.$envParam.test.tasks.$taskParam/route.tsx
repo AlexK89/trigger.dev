@@ -36,6 +36,7 @@ import { TabButton, TabContainer } from "~/components/primitives/Tabs";
 import { TextLink } from "~/components/primitives/TextLink";
 import { TimezoneList } from "~/components/scheduled/timezones";
 import { useEnvironment } from "~/hooks/useEnvironment";
+import { usePresignedUpload } from "~/hooks/usePresignedUpload";
 import { useSearchParams } from "~/hooks/useSearchParam";
 import { useParams, Form, useActionData, useFetcher, useSubmit } from "@remix-run/react";
 import {
@@ -355,6 +356,7 @@ function StandardTaskForm({
   regions: Region[];
 }) {
   const environment = useEnvironment();
+  const params = useParams();
   const { value, replace } = useSearchParams();
   const tab = value("tab");
 
@@ -378,6 +380,14 @@ function StandardTaskForm({
   }, []);
 
   const currentPayloadJson = useRef<string>(defaultPayloadJson);
+
+  const {
+    state: uploadState,
+    upload: uploadPayload,
+    abort: abortUpload,
+    dismissError: dismissUploadError,
+  } = usePresignedUpload();
+  const payloadTypeRef = useRef<string>("application/json");
 
   const [defaultMetadataJson, setDefaultMetadataJson] = useState<string>(
     lastRun?.seedMetadata ?? startingJson
@@ -450,10 +460,28 @@ function StandardTaskForm({
     id: "test-task",
     // TODO: type this
     lastSubmission: lastSubmission as any,
-    onSubmit(event, { formData }) {
+    async onSubmit(event, { formData }) {
       event.preventDefault();
 
-      formData.set(payload.name, currentPayloadJson.current);
+      const payloadJson = currentPayloadJson.current;
+      // @TODO: This should live in a separate helper function
+      const presignUrl = `/resources/orgs/${params.organizationSlug}/projects/${params.projectParam}/env/${params.envParam}/presign-payload`;
+
+      const result = await uploadPayload(payloadJson, presignUrl);
+
+      if (result.outcome === "failed") {
+        return;
+      }
+
+      if (result.outcome === "uploaded") {
+        formData.set(payload.name, result.storagePath);
+        formData.set("payloadType", "application/store");
+        payloadTypeRef.current = "application/store";
+      } else {
+        formData.set(payload.name, payloadJson);
+        payloadTypeRef.current = "application/json";
+      }
+
       formData.set(metadata.name, currentMetadataJson.current);
 
       submit(formData, { method: "POST" });
@@ -468,6 +496,7 @@ function StandardTaskForm({
       <input {...conform.input(taskIdentifier, { type: "hidden" })} value={task.taskIdentifier} />
       <input {...conform.input(environmentId, { type: "hidden" })} value={environment.id} />
       <input {...conform.input(triggerSource, { type: "hidden" })} value={"STANDARD"} />
+      <input type="hidden" name="payloadType" value={payloadTypeRef.current} />
       <div className="flex items-center justify-between gap-1.5 border-b border-grid-bright p-2">
         <div className="flex items-center gap-1.5">
           <TaskTriggerSourceIcon source={"STANDARD"} />
@@ -851,41 +880,82 @@ function StandardTaskForm({
           />
         </ResizablePanel>
       </ResizablePanelGroup>
-      <div className="flex items-center justify-end gap-3 border-t border-grid-bright bg-background-dimmed p-2">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1">
-            <Paragraph variant="small" className="whitespace-nowrap">
-              This test will run in
-            </Paragraph>
-            <EnvironmentCombo environment={environment} className="gap-0.5" />
+      <div className="border-t border-grid-bright bg-background-dimmed">
+        {uploadState.status === "error" && (
+          <div className="flex items-center gap-2 bg-error/10 px-3 py-1.5 text-sm text-error">
+            <span>{uploadState.message}</span>
+            <button
+              type="button"
+              className="text-xs underline"
+              onClick={dismissUploadError}
+            >
+              Dismiss
+            </button>
           </div>
-          <CreateTemplateModal
-            rawTestTaskFormData={{
-              environmentId: environment.id,
-              taskIdentifier: task.taskIdentifier,
-              triggerSource: "STANDARD",
-              ttlSeconds: ttlValue?.toString(),
-              queue: queueValue,
-              concurrencyKey: concurrencyKeyValue,
-              maxAttempts: maxAttemptsValue?.toString(),
-              maxDurationSeconds: maxDurationValue?.toString(),
-              tags: tagsValue.join(","),
-              machine: machineValue,
-            }}
-            getCurrentPayload={() => currentPayloadJson.current}
-            getCurrentMetadata={() => currentMetadataJson.current}
-            setShowCreatedSuccessMessage={setShowTemplateCreatedSuccessMessage}
-          />
-          <Button
-            type="submit"
-            variant="primary/medium"
-            LeadingIcon={BeakerIcon}
-            shortcut={{ key: "enter", modifiers: ["mod"], enabledOnInputElements: true }}
-            name="formAction"
-            value={"run-standard" satisfies FormAction}
-          >
-            Run test
-          </Button>
+        )}
+        {(uploadState.status === "presigning" || uploadState.status === "uploading") && (
+          <div className="px-3 py-1.5">
+            <div className="flex items-center justify-between text-xs text-text-dimmed">
+              <span>
+                {uploadState.status === "presigning"
+                  ? "Preparing upload…"
+                  : `Uploading payload… ${uploadState.progress}%`}
+              </span>
+              <button
+                type="button"
+                className="text-xs underline"
+                onClick={abortUpload}
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-charcoal-700">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-200"
+                style={{
+                  width: `${uploadState.status === "uploading" ? uploadState.progress : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-3 p-2">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <Paragraph variant="small" className="whitespace-nowrap">
+                This test will run in
+              </Paragraph>
+              <EnvironmentCombo environment={environment} className="gap-0.5" />
+            </div>
+            <CreateTemplateModal
+              rawTestTaskFormData={{
+                environmentId: environment.id,
+                taskIdentifier: task.taskIdentifier,
+                triggerSource: "STANDARD",
+                ttlSeconds: ttlValue?.toString(),
+                queue: queueValue,
+                concurrencyKey: concurrencyKeyValue,
+                maxAttempts: maxAttemptsValue?.toString(),
+                maxDurationSeconds: maxDurationValue?.toString(),
+                tags: tagsValue.join(","),
+                machine: machineValue,
+              }}
+              getCurrentPayload={() => currentPayloadJson.current}
+              getCurrentMetadata={() => currentMetadataJson.current}
+              setShowCreatedSuccessMessage={setShowTemplateCreatedSuccessMessage}
+            />
+            <Button
+              type="submit"
+              variant="primary/medium"
+              LeadingIcon={BeakerIcon}
+              shortcut={{ key: "enter", modifiers: ["mod"], enabledOnInputElements: true }}
+              name="formAction"
+              value={"run-standard" satisfies FormAction}
+              disabled={uploadState.status !== "idle" && uploadState.status !== "error"}
+            >
+              Run test
+            </Button>
+          </div>
         </div>
       </div>
     </Form>

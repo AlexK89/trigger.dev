@@ -57,19 +57,23 @@ export const RunOptionsData = z.object({
 export type RunOptionsData = z.infer<typeof RunOptionsData>;
 
 export const TestTaskData = z
-  .discriminatedUnion("triggerSource", [
-    z.object({
-      triggerSource: z.literal("STANDARD"),
-      payload: z
-        .string()
-        .optional()
-        .transform((val, ctx) => {
-          if (!val) {
-            return {};
-          }
-
+  .union([
+    z
+      .object({
+        triggerSource: z.literal("STANDARD"),
+        payload: z.string().optional(),
+        payloadType: z.string().optional(),
+        metadata: z.string().optional(),
+      })
+      .transform((val, ctx) => {
+        let parsedPayload: unknown;
+        if (val.payloadType === "application/store") {
+          parsedPayload = val.payload ?? "";
+        } else if (!val.payload) {
+          parsedPayload = {};
+        } else {
           try {
-            return JSON.parse(val);
+            parsedPayload = JSON.parse(val.payload);
           } catch {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -77,17 +81,14 @@ export const TestTaskData = z
             });
             return z.NEVER;
           }
-        }),
-      metadata: z
-        .string()
-        .optional()
-        .transform((val, ctx) => {
-          if (!val) {
-            return {};
-          }
+        }
 
+        let parsedMetadata: unknown;
+        if (!val.metadata) {
+          parsedMetadata = {};
+        } else {
           try {
-            return JSON.parse(val);
+            parsedMetadata = JSON.parse(val.metadata);
           } catch {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -95,8 +96,14 @@ export const TestTaskData = z
             });
             return z.NEVER;
           }
-        }),
-    }),
+        }
+
+        return {
+          ...val,
+          payload: parsedPayload,
+          metadata: parsedMetadata,
+        };
+      }),
     z.object({
       triggerSource: z.literal("SCHEDULED"),
       timestamp: z.preprocess((val) => (val === "" ? undefined : val), z.coerce.date()),

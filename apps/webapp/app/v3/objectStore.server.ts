@@ -184,6 +184,8 @@ export type GeneratePacketPresignOptions = {
    * Ignored for GET — reads never infer protocol from env for unprefixed keys.
    */
   forceNoPrefix?: boolean;
+  /** Override the default presigned URL TTL (in seconds). Defaults to 300 (5 minutes). */
+  expiresIn?: number;
 };
 
 /**
@@ -256,7 +258,7 @@ export async function generatePresignedRequest(
   const key = `packets/${projectRef}/${envSlug}/${path}`;
 
   try {
-    const url = await client.presign(key, method, 300); // 5 minutes
+    const url = await client.presign(key, method, options?.expiresIn ?? 300);
 
     logger.debug("Generated presigned URL", {
       url,
